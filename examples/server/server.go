@@ -14,7 +14,7 @@ func NewEchoTask(conn net.Conn) *EchoTask {
 	s := &EchoTask{
 		TcpTask: *gonet.NewTcpTask(conn),
 	}
-	s.Derived = s
+	s.Driver = s
 	return s
 }
 
@@ -45,7 +45,7 @@ func EchoServer_GetMe() *EchoServer {
 		serverm = &EchoServer{
 			tcpser: &gonet.TcpServer{},
 		}
-		serverm.Derived = serverm
+		serverm.Driver = serverm
 	}
 	return serverm
 }

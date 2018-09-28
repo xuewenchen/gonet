@@ -7,7 +7,7 @@ import (
 	"syscall"
 )
 
-type IService interface {
+type ServiceDriver interface {
 	Init() bool
 	MainLoop()
 	Reload()
@@ -16,7 +16,7 @@ type IService interface {
 
 type Service struct {
 	terminate bool
-	Derived   IService
+	Driver    ServiceDriver
 }
 
 func (this *Service) Terminate() {
@@ -42,13 +42,15 @@ func (this *Service) Main() bool {
 		}
 	}()
 
+	runtime.GOMAXPROCS(runtime.NumCPU())
+
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGQUIT, syscall.SIGABRT, syscall.SIGTERM, syscall.SIGPIPE, syscall.SIGHUP)
 	go func() {
 		for sig := range ch {
 			switch sig {
 			case syscall.SIGHUP:
-				this.Derived.Reload()
+				this.Driver.Reload()
 			case syscall.SIGPIPE:
 			default:
 				this.Terminate()
@@ -56,16 +58,14 @@ func (this *Service) Main() bool {
 		}
 	}()
 
-	runtime.GOMAXPROCS(runtime.NumCPU())
-
-	if !this.Derived.Init() {
+	if !this.Driver.Init() {
 		return false
 	}
 
 	for !this.isTerminate() {
-		this.Derived.MainLoop()
+		this.Driver.MainLoop()
 	}
 
-	this.Derived.Final()
+	this.Driver.Final()
 	return true
 }

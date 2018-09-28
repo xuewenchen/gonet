@@ -15,7 +15,7 @@ func NewClient() *Client {
 	s := &Client{
 		TcpTask: *gonet.NewTcpTask(nil),
 	}
-	s.Derived = s
+	s.Driver = s
 	return s
 }
 

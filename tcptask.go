@@ -8,8 +8,8 @@ import (
 	"time"
 )
 
-type ITcpTask interface {
-	ParseMsg(data []byte, flag byte) bool // data is real data, flag is whther compress
+type TcpTaskDriver interface {
+	ParseMsg(data []byte, flag byte) bool
 	OnClose()
 }
 
@@ -21,17 +21,18 @@ const (
 )
 
 type TcpTask struct {
-	closed     int32         // whther is close
-	verified   bool          // whther is  verified
-	stopedChan chan struct{} //
+	sync.Mutex
+	Conn       net.Conn
 	recvBuff   *ByteBuffer
 	sendBuff   *ByteBuffer
-	sendMutex  sync.Mutex
-	Conn       net.Conn
-	Derived    ITcpTask
+	stopedChan chan struct{}
 	signal     chan struct{}
-	Uid        uint64
-	Nid        uint64
+	Driver     TcpTaskDriver
+
+	verified bool
+	closed   int32
+	Uid      uint64
+	Nid      uint64
 }
 
 var netId uint64
@@ -113,7 +114,11 @@ func (this *TcpTask) Close() {
 	this.recvBuff.Reset()
 	this.sendBuff.Reset()
 	close(this.stopedChan)
-	this.Derived.OnClose()
+	this.Driver.OnClose()
+}
+
+func (this *TcpTask) Terminate() {
+	this.Close()
 }
 
 func (this *TcpTask) Reset() bool {
@@ -141,33 +146,15 @@ func (this *TcpTask) IsVerified() bool {
 	return this.verified
 }
 
-func (this *TcpTask) Terminate() {
-	this.Close()
-}
-
 func (this *TcpTask) SendData(buffer []byte, flag byte) bool {
 	if this.IsClosed() {
 		return false
 	}
 	bsize := len(buffer)
-	this.sendMutex.Lock()
+	this.Lock()
 	this.sendBuff.Append(byte(bsize), byte(bsize>>8), byte(bsize>>16), flag)
 	this.sendBuff.Append(buffer...)
-	this.sendMutex.Unlock()
-	this.Signal()
-	return true
-}
-
-func (this *TcpTask) SendDataWithHead(head []byte, buffer []byte, flag byte) bool {
-	if this.IsClosed() {
-		return false
-	}
-	bsize := len(buffer) + len(head)
-	this.sendMutex.Lock()
-	this.sendBuff.Append(byte(bsize), byte(bsize>>8), byte(bsize>>16), flag)
-	this.sendBuff.Append(head...)
-	this.sendBuff.Append(buffer...)
-	this.sendMutex.Unlock()
+	this.Unlock()
 	this.Signal()
 	return true
 }
@@ -218,9 +205,8 @@ func (this *TcpTask) recvloop() {
 			msgbuff = this.recvBuff.RdBuf()
 		}
 
-		this.Derived.ParseMsg(msgbuff[cmd_header_size:cmd_header_size+datasize], msgbuff[3])
+		this.Driver.ParseMsg(msgbuff[cmd_header_size:cmd_header_size+datasize], msgbuff[3])
 
-		// 清空，回退buffer
 		this.recvBuff.RdFlip(cmd_header_size + datasize)
 	}
 }
@@ -243,12 +229,12 @@ func (this *TcpTask) sendloop(job *sync.WaitGroup) {
 		select {
 		case <-this.signal:
 			for {
-				this.sendMutex.Lock()
+				this.Lock()
 				if this.sendBuff.RdReady() {
 					tmpByte.Append(this.sendBuff.RdBuf()[:this.sendBuff.RdSize()]...)
 					this.sendBuff.Reset()
 				}
-				this.sendMutex.Unlock()
+				this.Unlock()
 				if !tmpByte.RdReady() {
 					break
 				}
